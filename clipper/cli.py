@@ -44,7 +44,7 @@ def cmd_hits(a):
 
 def cmd_motion(a):
     work = work_for(a.game)
-    data = motion_mod.detect(work)
+    data = motion_mod.detect(work, motion_mod.parse_region(a.court) if a.court else None)
     if data["usable"]:
         busy = sum(v >= rally_mod.RallySettings.busy_above for v in data["score"]) / data["fps"]
         print(f"Measured movement -> {work / c.MOTION}. The picture is busy for about "
@@ -57,13 +57,11 @@ def cmd_rallies(a):
     work = work_for(a.game)
     settings = rally_mod.RallySettings(max_gap=a.max_gap, min_hits=a.min_hits,
                                        still_below=a.still_below, join_gap=a.join_gap,
-                                       join_above=a.join_above, motion_only=a.motion_only)
-    rallies = rally_mod.find(work, settings, use_motion=not a.no_motion)
+                                       join_above=a.join_above, motion_only=a.motion_only,
+                                       max_tail=a.max_tail)
+    rallies = rally_mod.find(work, settings, use_motion=a.use_motion)
     duration = c.read_json(work / c.INFO)["duration"]
-    if c.read_json(work / c.RALLIES)["used_motion"]:
-        print("Using both the sound and the picture.")
-    else:
-        print("Using the sound only (run 'clip motion' first to use the picture too).")
+    print("Using both the sound and the picture." if a.use_motion else "Using the sound only.")
     kept = sum(r["end"] - r["start"] for r in rallies)
     for r in rallies:
         print(f"  rally {r['id']:3d}  {c.timecode(r['start'])} - {c.timecode(r['end'])}  {r['hit_count']} hits")
@@ -103,9 +101,6 @@ def cmd_run(a):
     if not (work / c.HITS).exists():
         print("Listening for hits...")
         hit_mod.detect(work, beep_check=False)
-    if not (work / c.MOTION).exists():
-        print("Measuring movement...")
-        motion_mod.detect(work)
     rally_mod.find(work)
     common = {"game": str(work), "out": a.out, "top": a.top}
     cmd_export(argparse.Namespace(style="full", **common))
@@ -139,6 +134,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("motion", help="step 2b: measure how much the picture moves")
     s.add_argument("game", help="the game video or its work folder")
+    s.add_argument("--court", help="only watch this part of the frame: left,top,right,bottom as "
+                                   "fractions, e.g. 0.2,0.3,0.8,0.75 (default: the whole frame)")
     s.set_defaults(func=cmd_motion)
 
     s = sub.add_parser("rallies", help="step 3: group hits into rallies")
@@ -146,7 +143,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--max-gap", type=float, default=rally_mod.RallySettings.max_gap,
                    help="seconds of quiet that end a rally (default %(default)s)")
     s.add_argument("--min-hits", type=int, default=rally_mod.RallySettings.min_hits)
-    s.add_argument("--no-motion", action="store_true", help="ignore the picture, use the sound only")
+    s.add_argument("--use-motion", action="store_true",
+                   help="also use the picture (run 'clip motion' first)")
     s.add_argument("--still-below", type=float, default=rally_mod.RallySettings.still_below,
                    help="drop hits made while the picture is stiller than this, 0-1 (default %(default)s)")
     s.add_argument("--join-gap", type=float, default=rally_mod.RallySettings.join_gap,
@@ -155,6 +153,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="...busy meaning movement never drops below this, 0-1 (default %(default)s)")
     s.add_argument("--motion-only", action="store_true",
                    help="also keep busy stretches of play where no hits were heard")
+    s.add_argument("--max-tail", type=float, default=rally_mod.RallySettings.max_tail,
+                   help="longest a point may play out after the last hit heard, seconds (default %(default)s)")
     s.set_defaults(func=cmd_rallies)
 
     s = sub.add_parser("eval", help="compare found rallies with a CSV of real rally times")

@@ -89,14 +89,23 @@ def test_motion_drops_hits_during_a_still_picture():
 def test_motion_joins_split_rallies_and_keeps_two_hit_runs():
     times = [10, 11, 12,   18, 19, 20,   40, 41]
     found = rallies.group_hits(times, 60, motion=_motion(60, [(9, 22), (39, 43)]))
-    assert [(r["start"], r["end"], r["hit_count"]) for r in found] == [(9, 21.5, 6), (39, 42.5, 2)]
+    assert [(r["start"], r["end"], r["hit_count"]) for r in found] == [(9, 23.5, 6), (39, 44.5, 2)]
+
+
+def test_point_plays_out_until_the_players_settle():
+    motion = _motion(60, [(9, 16)])       # play goes on 3 s after the last hit at 13
+    found = rallies.group_hits([10, 11, 12, 13], 60, motion=motion)
+    assert found[0]["end"] == 17.5         # settled at 16, plus pad_after
+    motion = _motion(60, [(9, 30)])       # never settles: capped by max_tail
+    found = rallies.group_hits([10, 11, 12, 13], 60, motion=motion)
+    assert found[0]["end"] == 22.5
 
 
 def test_motion_only_stretches_are_kept_when_asked():
     settings = rallies.RallySettings(motion_only=True)
     motion = _motion(60, [(9, 15), (30, 40)])
     found = rallies.group_hits([10, 11, 12], 60, settings, motion)
-    assert [(r["start"], r["end"], r["hit_count"]) for r in found] == [(9, 13.5, 3), (29, 41.5, 0)]
+    assert [(r["start"], r["end"], r["hit_count"]) for r in found] == [(9, 16.5, 3), (29, 41.5, 0)]
     assert len(rallies.group_hits([10, 11, 12], 60, motion=motion)) == 1
 
 

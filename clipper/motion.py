@@ -22,10 +22,34 @@ SIZE = (96, 54)     # tiny frames are plenty to see "a lot" vs "a little" moveme
 SMOOTH = 1.0        # seconds of averaging, so a single twitch doesn't count
 
 
-def frame_differences(proxy: Path) -> np.ndarray:
-    """Average pixel change between each frame and the previous one, FPS per second."""
+Region = tuple[float, float, float, float]  # left, top, right, bottom as fractions of the frame
+
+
+def parse_region(text: str) -> Region:
+    """'0.2,0.3,0.8,0.75' -> (0.2, 0.3, 0.8, 0.75)."""
+    try:
+        parts = tuple(float(x) for x in text.split(","))
+    except ValueError:
+        parts = ()
+    if len(parts) != 4 or not (0 <= parts[0] < parts[2] <= 1 and 0 <= parts[1] < parts[3] <= 1):
+        raise c.ClipperError("--court needs four numbers between 0 and 1: left,top,right,bottom, "
+                             "for example 0.2,0.3,0.8,0.75")
+    return parts
+
+
+def frame_differences(proxy: Path, region: Region | None = None) -> np.ndarray:
+    """Average pixel change between each frame and the previous one, FPS per second.
+
+    With a region, only that part of the frame is watched. Pointing it at the
+    court keeps someone walking right past the phone from counting as play.
+    """
+    filters = []
+    if region is not None:
+        l, t, r, b = region
+        filters.append(f"crop=iw*{r - l:.4f}:ih*{b - t:.4f}:iw*{l:.4f}:ih*{t:.4f}")
+    filters.append(f"scale={SIZE[0]}:{SIZE[1]}")
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(proxy),
-           "-vf", f"scale={SIZE[0]}:{SIZE[1]}", "-f", "rawvideo", "-pix_fmt", "gray", "-"]
+           "-vf", ",".join(filters), "-f", "rawvideo", "-pix_fmt", "gray", "-"]
     result = subprocess.run(cmd, capture_output=True)
     if result.returncode != 0:
         raise c.ClipperError(f"FFmpeg failed:\n{result.stderr.decode().strip()}")
@@ -59,11 +83,11 @@ def score(diff: np.ndarray) -> tuple[np.ndarray, dict]:
     return scaled.astype(np.float32), {"idle": round(idle, 3), "busy": round(busy, 3), "usable": usable}
 
 
-def detect(work: Path) -> dict:
+def detect(work: Path, region: Region | None = None) -> dict:
     proxy = c.need(work, c.PROXY, "ingest")
-    diff = frame_differences(proxy)
+    diff = frame_differences(proxy, region)
     scaled, stats = score(diff)
-    data = {"fps": FPS, "smooth_seconds": SMOOTH, **stats,
+    data = {"fps": FPS, "smooth_seconds": SMOOTH, "region": region, **stats,
             "score": [round(float(v), 3) for v in scaled]}
     c.write_json(work / c.MOTION, data)
     return data

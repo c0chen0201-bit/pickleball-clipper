@@ -1,7 +1,7 @@
 """Step 3: group hits into rallies. Everything between rallies is dead time.
 
-With only the sound, a rally is a run of paddle hits close together. When
-'clip motion' has been run too, the picture helps in four ways:
+With only the sound, a rally is a run of paddle hits close together. With
+--use-motion (after 'clip motion'), the picture helps in five ways:
 
 - a run of hits during a still picture (a towel break near a noisy court) is
   dropped;
@@ -9,7 +9,10 @@ With only the sound, a rally is a run of paddle hits close together. When
   joined into one rally instead of being split in two;
 - a short run of only two hits counts if the players were clearly playing;
 - a busy stretch with no hits heard at all can be kept as a rally
-  (off by default: turn on with --motion-only).
+  (off by default: turn on with --motion-only);
+- a point plays out: after the last hit heard, the rally keeps going while
+  the players are still moving, and ends once they settle (the ball has
+  bounced twice or left the court), instead of a fixed second and a half.
 """
 
 from __future__ import annotations
@@ -37,6 +40,9 @@ class RallySettings:
     motion_only: bool = False   # also keep busy stretches with no hits at all
     busy_above: float = 0.6     # ...if the motion stays above this
     busy_seconds: float = 4.0   # ...for at least this long
+    settle_below: float = 0.3   # after the last hit, the point is over once motion drops below this
+    settle_seconds: float = 0.7 # ...and stays there this long
+    max_tail: float = 8.0       # never play out more than this after the last hit
 
 
 def _runs(times: list[float], max_gap: float) -> list[list[float]]:
@@ -47,6 +53,20 @@ def _runs(times: list[float], max_gap: float) -> list[list[float]]:
         else:
             runs.append([t])
     return runs
+
+
+def play_out(motion: np.ndarray, last_hit: float, settings: RallySettings) -> float:
+    """When the point ended: the first moment after the last hit that the players settle."""
+    fps = motion_mod.FPS
+    a = int(last_hit * fps)
+    b = min(len(motion), int((last_hit + settings.max_tail) * fps))
+    need = max(1, int(round(settings.settle_seconds * fps)))
+    quiet = 0
+    for i in range(a, b):
+        quiet = quiet + 1 if motion[i] < settings.settle_below else 0
+        if quiet >= need:
+            return (i - need + 1) / fps
+    return b / fps
 
 
 def group_hits(times: list[float], duration: float, settings: RallySettings = RallySettings(),
@@ -75,8 +95,11 @@ def group_hits(times: list[float], duration: float, settings: RallySettings = Ra
     else:
         runs = [run for run in runs if len(run) >= settings.min_hits]
 
-    spans = [(max(0.0, run[0] - settings.pad_before),
-              min(duration, run[-1] + settings.pad_after), run) for run in runs]
+    def end_of(run: list[float]) -> float:
+        last = run[-1] if motion is None else play_out(motion, run[-1], settings)
+        return min(duration, last + settings.pad_after)
+
+    spans = [(max(0.0, run[0] - settings.pad_before), end_of(run), run) for run in runs]
 
     if motion is not None and settings.motion_only:
         for s, e in motion_mod.busy_stretches(motion, settings.busy_above, settings.busy_seconds):
@@ -102,10 +125,14 @@ def group_hits(times: list[float], duration: float, settings: RallySettings = Ra
     return [{k: r[k] for k in ("id", "start", "end", "hit_count", "hits")} for r in rallies]
 
 
-def find(work: Path, settings: RallySettings = RallySettings(), use_motion: bool = True) -> list[dict]:
+def find(work: Path, settings: RallySettings = RallySettings(), use_motion: bool = False) -> list[dict]:
     hits = c.read_json(c.need(work, c.HITS, "hits"))["hits"]
     duration = c.read_json(c.need(work, c.INFO, "ingest"))["duration"]
-    motion = motion_mod.load(work) if use_motion else None
+    motion = None
+    if use_motion:
+        motion = motion_mod.load(work)
+        if motion is None:
+            raise c.ClipperError("No usable movement data. Run 'clip motion' first.")
     rallies = group_hits([h["time"] for h in hits], duration, settings, motion)
     c.write_json(work / c.RALLIES, {"settings": asdict(settings), "used_motion": motion is not None,
                                     "duration": duration, "rallies": rallies})

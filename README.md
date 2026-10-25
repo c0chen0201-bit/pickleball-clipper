@@ -65,7 +65,7 @@ rerun any step on its own.
 | 1 | `clip ingest my_game.mp4` | Clean copies of the video and its sound |
 | 2 | `clip hits my_game.mp4` | `hits.json`, plus `hits_check.mp4`, which **beeps on every hit it heard**. Watch it to check by ear. |
 | 2b | `clip motion my_game.mp4` | `motion.json`: how much the picture moves, moment by moment |
-| 3 | `clip rallies my_game.mp4` | A list of rallies and how much of the game is kept. Uses the sound and, if step 2b was run, the picture. |
+| 3 | `clip rallies my_game.mp4` | A list of rallies and how much of the game is kept. Add `--use-motion` after step 2b to use the picture too. |
 | 3b | `clip eval my_game.mp4 --labels my_labels.csv` | How many of *your* rallies it found, and any false alarms |
 | 4 | `clip export my_game.mp4` | `full_game.mp4` |
 | 5 | `clip export my_game.mp4 --style highlights --top 5` | The highlight reel and the 5 clips |
@@ -75,11 +75,17 @@ more sensitive). **If it hears hits that aren't there**, raise it to 15.
 **If rallies get split in two**, try `clip rallies my_game.mp4 --max-gap 3.5`.
 
 **Indoors, or near other courts**, the sound alone is not enough: your own
-hits are barely louder than the room. Run `clip motion` and then
-`clip rallies` again. The picture then settles what the sound can't: hits
-during a still picture (a break) are dropped, two runs of hits with busy play
-between them are joined into one rally, and `--motion-only` also keeps busy
-stretches of play where no hit was heard at all.
+hits are barely louder than the room. Try `clip motion` and then
+`clip rallies --use-motion`. The picture then settles what the sound can't:
+hits during a still picture (a break) are dropped, two runs of hits with busy
+play between them are joined into one rally, each point plays out until the
+players settle, and `--motion-only` also keeps busy stretches of play where
+no hit was heard at all.
+
+This only works if the camera mostly sees the court. If people walk right
+past the phone between points, that counts as a lot of movement, so tell it
+where the court is in the frame: `clip motion my_game.mp4 --court 0.2,0.3,0.8,0.75`
+(left, top, right, bottom, as fractions of the picture).
 
 ### Writing down your own rally times
 
