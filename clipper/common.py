@@ -17,6 +17,8 @@ HITS = "hits.json"
 HITS_CHECK = "hits_check.mp4"
 MOTION = "motion.json"   # how much the picture moves, 10 times a second
 RALLIES = "rallies.json"
+BALL = "ball.json"        # where the ball was in every frame, and bounces/exits
+BALL_CHECK = "ball_check.mp4"
 
 SAMPLE_RATE = 16_000
 

@@ -8,10 +8,12 @@ version = "0.1.0"
 description = "Turn a full recorded pickleball game into a dead-time-free cut and a highlight reel."
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["numpy>=1.24"]
+dependencies = ["numpy>=1.24", "opencv-python-headless>=4.8"]
 
 [project.optional-dependencies]
 dev = ["pytest"]
+# The trained ball model (clip label / clip train-ball / clip ball --model):
+ai = ["ultralytics>=8.3", "torch>=2.2"]
 
 [project.scripts]
 clip = "clipper.cli:main"

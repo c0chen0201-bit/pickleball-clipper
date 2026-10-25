@@ -6,8 +6,11 @@ import argparse
 import sys
 from pathlib import Path
 
+from . import ball as ball_mod
 from . import common as c
 from . import evaluate as ev
+from . import label as label_mod
+from . import train as train_mod
 from . import hits as hit_mod
 from . import ingest as ingest_mod
 from . import motion as motion_mod
@@ -53,15 +56,52 @@ def cmd_motion(a):
         print("The picture barely changes, so movement will be ignored.")
 
 
+def cmd_ball(a):
+    work = work_for(a.game)
+    settings = ball_mod.BallSettings(diff_threshold=a.diff_threshold)
+    model = Path(a.model) if a.model else None
+
+    def progress(done, total):
+        print(f"  {done}/{total} frames", end="\r", flush=True)
+
+    data = ball_mod.detect(work, settings, model, check=not a.no_check, progress=progress)
+    seen = sum(len(t["points"]) for t in data["tracks"])
+    bounces = sum(e["type"] == "bounce" for e in data["events"])
+    exits = sum(e["type"] == "off_screen" for e in data["events"])
+    print(f"Followed the ball in {len(data['tracks'])} stretches covering {seen} frames; "
+          f"{bounces} bounces, {exits} exits -> {work / c.BALL}")
+    if not a.no_check:
+        print(f"Watch {work / c.BALL_CHECK}: a circle follows the ball it found.")
+
+
+def cmd_label(a):
+    out = Path(a.out)
+    result = label_mod.export(work_for(a.game), out, a.frames, a.seed)
+    print(f"Saved {result['positives']} frames with a ball mark and {result['negatives']} without "
+          f"into {out}/ ({result['total']} frames in total).")
+    print(f"Open {out / 'review.html'} in a browser to check and fix the marks.")
+
+
+def cmd_label_fix(a):
+    n = label_mod.apply_fixes(Path(a.labels), Path(a.fixes))
+    print(f"Applied {n} corrections in {a.labels}/.")
+
+
+def cmd_train_ball(a):
+    out = train_mod.train(Path(a.labels), Path(a.out), a.epochs, a.imgsz, a.batch, device=a.device)
+    print(f"Trained ball model -> {out}. Use it with: clip ball <game> --model {out}")
+
+
 def cmd_rallies(a):
     work = work_for(a.game)
     settings = rally_mod.RallySettings(max_gap=a.max_gap, min_hits=a.min_hits,
                                        still_below=a.still_below, join_gap=a.join_gap,
                                        join_above=a.join_above, motion_only=a.motion_only,
-                                       max_tail=a.max_tail)
-    rallies = rally_mod.find(work, settings, use_motion=a.use_motion)
+                                       max_tail=a.max_tail, pad_after=a.tail)
+    rallies = rally_mod.find(work, settings, use_motion=a.use_motion, use_ball=a.use_ball)
     duration = c.read_json(work / c.INFO)["duration"]
-    print("Using both the sound and the picture." if a.use_motion else "Using the sound only.")
+    using = ["the sound"] + (["the picture"] if a.use_motion else []) + (["the ball"] if a.use_ball else [])
+    print("Using " + " and ".join(using) + ".")
     kept = sum(r["end"] - r["start"] for r in rallies)
     for r in rallies:
         print(f"  rally {r['id']:3d}  {c.timecode(r['start'])} - {c.timecode(r['end'])}  {r['hit_count']} hits")
@@ -143,8 +183,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--max-gap", type=float, default=rally_mod.RallySettings.max_gap,
                    help="seconds of quiet that end a rally (default %(default)s)")
     s.add_argument("--min-hits", type=int, default=rally_mod.RallySettings.min_hits)
+    s.add_argument("--tail", type=float, default=rally_mod.RallySettings.pad_after,
+                   help="seconds kept after the last hit heard (default %(default)s)")
     s.add_argument("--use-motion", action="store_true",
                    help="also use the picture (run 'clip motion' first)")
+    s.add_argument("--use-ball", action="store_true",
+                   help="end each point at the second bounce or when the ball leaves (run 'clip ball' first)")
     s.add_argument("--still-below", type=float, default=rally_mod.RallySettings.still_below,
                    help="drop hits made while the picture is stiller than this, 0-1 (default %(default)s)")
     s.add_argument("--join-gap", type=float, default=rally_mod.RallySettings.join_gap,
@@ -156,6 +200,35 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--max-tail", type=float, default=rally_mod.RallySettings.max_tail,
                    help="longest a point may play out after the last hit heard, seconds (default %(default)s)")
     s.set_defaults(func=cmd_rallies)
+
+    s = sub.add_parser("ball", help="step 6: find and follow the ball")
+    s.add_argument("game")
+    s.add_argument("--model", help="a trained ball model (.pt) from 'clip train-ball'; default: no training needed")
+    s.add_argument("--diff-threshold", type=float, default=ball_mod.BallSettings.diff_threshold,
+                   help="no-training detector: lower = sees fainter balls, more noise (default %(default)s)")
+    s.add_argument("--no-check", action="store_true", help="skip the ball_check.mp4 video")
+    s.set_defaults(func=cmd_ball)
+
+    s = sub.add_parser("label", help="step 6b: save frames with ball marks to check and train on")
+    s.add_argument("game")
+    s.add_argument("--out", default="ball_labels", help="folder for the frames (default %(default)s)")
+    s.add_argument("--frames", type=int, default=300, help="how many frames to take from this game")
+    s.add_argument("--seed", type=int, default=0)
+    s.set_defaults(func=cmd_label)
+
+    s = sub.add_parser("label-fix", help="apply fixes.json saved from review.html")
+    s.add_argument("labels", help="the folder made by 'clip label'")
+    s.add_argument("fixes", help="fixes.json downloaded from review.html")
+    s.set_defaults(func=cmd_label_fix)
+
+    s = sub.add_parser("train-ball", help="step 6c: train the ball detector on the labelled frames")
+    s.add_argument("labels", help="the folder made by 'clip label'")
+    s.add_argument("--out", default="ball_model.pt")
+    s.add_argument("--epochs", type=int, default=40)
+    s.add_argument("--imgsz", type=int, default=1280)
+    s.add_argument("--batch", type=int, default=8)
+    s.add_argument("--device", help="mps, cpu or 0 for the first GPU (default: best available)")
+    s.set_defaults(func=cmd_train_ball)
 
     s = sub.add_parser("eval", help="compare found rallies with a CSV of real rally times")
     s.add_argument("game")

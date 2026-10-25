@@ -11,8 +11,11 @@ With only the sound, a rally is a run of paddle hits close together. With
 - a busy stretch with no hits heard at all can be kept as a rally
   (off by default: turn on with --motion-only);
 - a point plays out: after the last hit heard, the rally keeps going while
-  the players are still moving, and ends once they settle (the ball has
-  bounced twice or left the court), instead of a fixed second and a half.
+  the players are still moving, and ends once they settle, instead of a
+  fixed tail.
+
+With --use-ball (after 'clip ball'), a point ends exactly when the ball
+bounces for the second time or leaves the picture.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from pathlib import Path
 
 import numpy as np
 
+from . import ball as ball_mod
 from . import common as c
 from . import motion as motion_mod
 
@@ -31,7 +35,7 @@ class RallySettings:
     max_gap: float = 2.5       # a longer silence than this ends the rally (seconds)
     min_hits: int = 3          # serve, return, third shot
     pad_before: float = 1.0    # show the server getting ready
-    pad_after: float = 1.5     # show the point ending
+    pad_after: float = 3.0     # after the last hit heard, the ball still has to bounce twice
     # The motion settings only matter when motion.json exists. Scores run
     # from 0 (the stillest the picture gets in this game) to 1 (the busiest).
     still_below: float = 0.25   # a run of hits with less average motion than this is not a rally
@@ -70,7 +74,7 @@ def play_out(motion: np.ndarray, last_hit: float, settings: RallySettings) -> fl
 
 
 def group_hits(times: list[float], duration: float, settings: RallySettings = RallySettings(),
-               motion: np.ndarray | None = None) -> list[dict]:
+               motion: np.ndarray | None = None, ball: dict | None = None) -> list[dict]:
     runs = _runs(times, settings.max_gap)
 
     if motion is not None:
@@ -96,6 +100,10 @@ def group_hits(times: list[float], duration: float, settings: RallySettings = Ra
         runs = [run for run in runs if len(run) >= settings.min_hits]
 
     def end_of(run: list[float]) -> float:
+        if ball is not None:
+            seen = ball_mod.point_end(ball, run[-1], settings.max_tail)
+            if seen is not None:
+                return min(duration, seen + 0.5)
         last = run[-1] if motion is None else play_out(motion, run[-1], settings)
         return min(duration, last + settings.pad_after)
 
@@ -125,7 +133,8 @@ def group_hits(times: list[float], duration: float, settings: RallySettings = Ra
     return [{k: r[k] for k in ("id", "start", "end", "hit_count", "hits")} for r in rallies]
 
 
-def find(work: Path, settings: RallySettings = RallySettings(), use_motion: bool = False) -> list[dict]:
+def find(work: Path, settings: RallySettings = RallySettings(), use_motion: bool = False,
+         use_ball: bool = False) -> list[dict]:
     hits = c.read_json(c.need(work, c.HITS, "hits"))["hits"]
     duration = c.read_json(c.need(work, c.INFO, "ingest"))["duration"]
     motion = None
@@ -133,7 +142,12 @@ def find(work: Path, settings: RallySettings = RallySettings(), use_motion: bool
         motion = motion_mod.load(work)
         if motion is None:
             raise c.ClipperError("No usable movement data. Run 'clip motion' first.")
-    rallies = group_hits([h["time"] for h in hits], duration, settings, motion)
+    ball = None
+    if use_ball:
+        ball = ball_mod.load(work)
+        if ball is None:
+            raise c.ClipperError("No ball data. Run 'clip ball' first.")
+    rallies = group_hits([h["time"] for h in hits], duration, settings, motion, ball)
     c.write_json(work / c.RALLIES, {"settings": asdict(settings), "used_motion": motion is not None,
-                                    "duration": duration, "rallies": rallies})
+                                    "used_ball": ball is not None, "duration": duration, "rallies": rallies})
     return rallies

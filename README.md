@@ -87,6 +87,30 @@ past the phone between points, that counts as a lot of movement, so tell it
 where the court is in the frame: `clip motion my_game.mp4 --court 0.2,0.3,0.8,0.75`
 (left, top, right, bottom, as fractions of the picture).
 
+### Following the ball (step 6)
+
+`clip ball my_game.mp4` finds the ball in every frame with no training at all
+(it looks for a small, round, fast-moving thing) and writes `ball_check.mp4`
+with a circle following it. Then `clip rallies my_game.mp4 --use-ball` ends
+each point exactly when the ball bounces for the second time or leaves the
+picture.
+
+To make it much more accurate, teach a small AI model what *your* ball looks
+like. Install the AI tools once with `pip install -e '.[ai]'` (about 1 GB),
+then:
+
+```
+clip label my_game.mp4 --out ball_labels --frames 300   # repeat for several games
+clip train-ball ball_labels --out ball_model.pt          # a few hours on a laptop
+clip ball my_game.mp4 --model ball_model.pt
+```
+
+`clip label` marks the ball automatically. The marks are not perfect, so it
+also writes `ball_labels/review.html`: open it in a browser, click the ball
+where a mark is wrong, press X on frames with no ball, and press "Save
+fixes". Then `clip label-fix ball_labels fixes.json` writes your corrections
+in. An hour of fixing makes a big difference to the model.
+
 ### Writing down your own rally times
 
 To measure accuracy on a real game, make a spreadsheet with a `start` and
