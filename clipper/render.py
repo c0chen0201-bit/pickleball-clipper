@@ -9,6 +9,7 @@ import numpy as np
 
 from . import common as c
 from . import score as scoring
+from . import vertical
 from .hits import load_audio
 
 ENCODE = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
@@ -72,5 +73,15 @@ def export_highlights(work: Path, out_dir: Path, top: int = 5) -> tuple[Path, li
         cut(video, r["start"], r["end"], clip)
         clips.append(clip)
     reel = out_dir / "highlight_reel.mp4"
+    join(clips, reel)
+    return reel, best
+
+
+def export_vertical(work: Path, out_dir: Path, top: int = 5) -> tuple[Path, list[dict]]:
+    """The best `top` rallies as tall 9:16 clips that follow the ball, plus one reel."""
+    audio: np.ndarray = load_audio(c.need(work, c.AUDIO, "ingest"))
+    best = scoring.rank(load_rallies(work), audio)[:top]
+    clips = vertical.export(work, out_dir, best)
+    reel = out_dir / "vertical_reel.mp4"
     join(clips, reel)
     return reel, best

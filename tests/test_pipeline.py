@@ -4,7 +4,7 @@ import shutil
 import numpy as np
 import pytest
 
-from clipper import ball, common, evaluate, hits, label, motion, rallies, score, synth, train
+from clipper import ball, common, evaluate, hits, label, motion, rallies, score, synth, train, vertical
 from clipper.cli import main
 
 
@@ -189,3 +189,22 @@ def test_label_export_and_fix_roundtrip(tmp_path):
     assert (out / "labels" / f"{names[-1]}.txt").read_text().startswith("0 0.078125 0.069444")
     data_yaml, _ = train.split(out)
     assert "names" in data_yaml.read_text() and (out / "train.txt").exists()
+
+
+def test_vertical_window_follows_the_ball_smoothly(tmp_path):
+    truth, _ = _ball_video(tmp_path / "ball.mp4")
+    data = ball.track_video(tmp_path / "ball.mp4")
+    cw, ch = vertical.crop_size(1280, 720)
+    assert (cw, ch) == (404, 720)
+    path = vertical.aim_path(data, 0.0, 5.0, 1280, cw)
+    assert len(path) == 150
+    # Stays inside the picture, never jumps, and is near the ball mid-flight.
+    assert path.min() >= cw / 2 and path.max() <= 1280 - cw / 2
+    assert np.abs(np.diff(path)).max() <= vertical.MAX_PAN + 1e-6
+    f, x, _ = truth[60]
+    assert abs(path[f] - x) < 120
+    # With no ball data the window stays centred.
+    assert np.allclose(vertical.aim_path(None, 0, 2, 1280, cw), 640)
+    out = tmp_path / "v.mp4"
+    vertical.cut_vertical(tmp_path / "ball.mp4", 0.5, 2.5, path[15:75], out)
+    assert 1.5 < common.probe_duration(out) < 2.5

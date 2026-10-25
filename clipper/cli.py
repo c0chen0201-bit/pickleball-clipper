@@ -125,6 +125,13 @@ def cmd_export(a):
     if a.style == "full":
         path = render.export_full(work, out)
         print(f"Full Game video -> {path}")
+    elif a.style == "vertical":
+        if not (work / c.BALL).exists():
+            print("Note: no ball data (run 'clip ball' first), so the tall clips will stay centred.")
+        reel, best = render.export_vertical(work, out, a.top)
+        for place, r in enumerate(best, 1):
+            print(f"  #{place}  rally {r['id']:3d}  {c.timecode(r['start'])}  score {r['score']}")
+        print(f"Vertical reel -> {reel} (plus each clip on its own in {out}/)")
     else:
         reel, best = render.export_highlights(work, out, a.top)
         for place, r in enumerate(best, 1):
@@ -236,9 +243,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--labels", required=True)
     s.set_defaults(func=cmd_eval)
 
-    s = sub.add_parser("export", help="steps 4-5: write the Full Game video or a highlight reel")
+    s = sub.add_parser("export", help="steps 4-7: write the Full Game video, a highlight reel, or vertical clips")
     s.add_argument("game")
-    s.add_argument("--style", choices=["full", "highlights"], default="full")
+    s.add_argument("--style", choices=["full", "highlights", "vertical"], default="full",
+                   help="full = dead time removed; highlights = top rallies; vertical = top rallies as 9:16 "
+                        "clips that follow the ball")
     s.add_argument("--top", type=int, default=5, help="how many rallies in the highlight reel")
     s.add_argument("--out", help="output folder (default: <video>_clips/)")
     s.set_defaults(func=cmd_export)

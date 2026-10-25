@@ -111,6 +111,17 @@ where a mark is wrong, press X on frames with no ball, and press "Save
 fixes". Then `clip label-fix ball_labels fixes.json` writes your corrections
 in. An hour of fixing makes a big difference to the model.
 
+### Vertical clips for phones (step 7)
+
+```
+clip export my_game.mp4 --style vertical --top 5
+```
+
+writes the top rallies as tall 9:16 clips (`vertical_1_rally012.mp4`, ...)
+and `vertical_reel.mp4`. The tall window follows the ball found by
+`clip ball`, panning smoothly, and settles on the middle of the court when
+the ball is out of sight.
+
 ### Writing down your own rally times
 
 To measure accuracy on a real game, make a spreadsheet with a `start` and
