@@ -38,10 +38,13 @@ class BallSettings:
     diff_threshold: float = 28.0  # how much a pixel must change (0-255) to count as moving
     min_area: int = 2             # ball size in pixels at WIDTH, smallest...
     max_area: int = 140           # ...and largest
+    player_margin: int = 14       # pixels: ignore candidates this close to a big moving thing
     link_radius: float = 45.0     # how far (pixels at WIDTH) the ball may move between frames
     max_coast: int = 4            # frames a track survives without seeing the ball
     min_track: int = 6            # shorter tracks are noise
     min_travel: float = 25.0      # a track that never goes anywhere is noise (pixels)
+    min_speed: float = 2.0        # pixels per frame on average; a ball is quick
+    max_wobble: float = 6.0       # pixels: how far off a straight-line guess the ball may land
     model_conf: float = 0.25      # trained model: lowest confidence to accept
 
 
@@ -80,13 +83,26 @@ def moving_blobs(prev: np.ndarray, cur: np.ndarray, nxt: np.ndarray,
     # where it was last frame only differs from one of them.
     d = np.minimum(np.abs(cur - prev), np.abs(cur - nxt))
     mask = (d > s.diff_threshold).astype(np.uint8)
-    n, _, stats, centers = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    # Big moving things are players. Anything on or right next to them is an
+    # arm, a paddle or a shoe, not the ball.
+    n, labels, stats, centers = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    big = np.zeros_like(mask)
+    for i in range(1, n):
+        x, y, w, h, area = stats[i]
+        if area > s.max_area or max(w, h) > 24:
+            big[labels == i] = 1
+    if big.any():
+        k = 2 * s.player_margin + 1
+        big = cv2.dilate(big, np.ones((k, k), np.uint8))
     out = []
     for i in range(1, n):
         x, y, w, h, area = stats[i]
         if not (s.min_area <= area <= s.max_area):
             continue
-        if max(w, h) > 24 or min(w, h) == 0 or max(w, h) / min(w, h) > 2.5:
+        if max(w, h) > 24 or min(w, h) == 0 or max(w, h) / min(w, h) > 2.5 or area < 0.4 * w * h:
+            continue
+        cx, cy = int(centers[i][0]), int(centers[i][1])
+        if big[cy, cx]:
             continue
         out.append((float(centers[i][0]), float(centers[i][1]), float(max(w, h))))
     return merge_close(out)
@@ -146,6 +162,27 @@ class Track:
         ys = [p[2] for p in self.points]
         return float(np.hypot(max(xs) - min(xs), max(ys) - min(ys)))
 
+    def speed(self) -> float:
+        """Average pixels moved per frame."""
+        if len(self.points) < 2:
+            return 0.0
+        p = np.array([(f, x, y) for f, x, y, _ in self.points])
+        steps = np.hypot(np.diff(p[:, 1]), np.diff(p[:, 2])) / np.maximum(1, np.diff(p[:, 0]))
+        return float(steps.mean())
+
+    def wobble(self) -> float:
+        """How far each point lands from where a straight line through the two before it says."""
+        if len(self.points) < 3:
+            return 0.0
+        p = np.array([(f, x, y) for f, x, y, _ in self.points])
+        guess = p[1:-1, 1:] + (p[1:-1, 1:] - p[:-2, 1:]) / np.maximum(1, p[1:-1, :1] - p[:-2, :1]) \
+            * np.maximum(1, p[2:, :1] - p[1:-1, :1])
+        return float(np.median(np.hypot(*(p[2:, 1:] - guess).T)))
+
+    def quality(self) -> float:
+        """Longer, faster and smoother tracks look more like a ball."""
+        return len(self.points) * min(self.speed(), 12.0) / (1.0 + self.wobble())
+
 
 def link(frames: list[list[tuple[float, float, float]]], s: BallSettings = BallSettings()) -> list[Track]:
     """Join per-frame candidates into tracks: nearest candidate to each track's predicted spot."""
@@ -184,7 +221,22 @@ def link(frames: list[list[tuple[float, float, float]]], s: BallSettings = BallS
                 still.append(t)
         active = still
     done += active
-    return [t for t in done if len(t.points) >= s.min_track and t.travel() >= s.min_travel]
+    good = [t for t in done if len(t.points) >= s.min_track and t.travel() >= s.min_travel
+            and t.speed() >= s.min_speed and t.wobble() <= s.max_wobble]
+    return one_at_a_time(good)
+
+
+def one_at_a_time(tracks: list[Track]) -> list[Track]:
+    """There is one ball, so keep the most ball-like track wherever tracks overlap in time."""
+    taken: set[int] = set()
+    kept = []
+    for t in sorted(tracks, key=lambda t: -t.quality()):
+        frames = {p[0] for p in t.points}
+        if len(frames & taken) > 0.2 * len(frames):
+            continue
+        taken |= frames
+        kept.append(t)
+    return kept
 
 
 # ------------------------------------------------------------------- events
