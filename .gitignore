@@ -1,0 +1,12 @@
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+# Videos are too big for git. Keep your games on your computer.
+*.mp4
+*.mov
+*.MOV
+*.m4v
+*.wav
+samples/
+*_work/
