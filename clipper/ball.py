@@ -24,6 +24,7 @@ from pathlib import Path
 import numpy as np
 
 from . import common as c
+from . import motion as motion_mod
 
 try:
     import cv2
@@ -35,7 +36,7 @@ WIDTH = 640  # frames are shrunk to this width for the no-training detector
 
 @dataclass
 class BallSettings:
-    diff_threshold: float = 28.0  # how much a pixel must change (0-255) to count as moving
+    diff_threshold: float = 22.0  # how much a pixel must change (0-255) to count as moving
     min_area: int = 2             # ball size in pixels at WIDTH, smallest...
     max_area: int = 140           # ...and largest
     player_margin: int = 14       # pixels: ignore candidates this close to a big moving thing
@@ -46,6 +47,10 @@ class BallSettings:
     min_speed: float = 2.0        # pixels per frame on average; a ball is quick
     max_wobble: float = 6.0       # pixels: how far off a straight-line guess the ball may land
     model_conf: float = 0.25      # trained model: lowest confidence to accept
+    # Colour: pickleballs are yellow-green (OpenCV hue 0-180, so yellow is ~30 and green ~60).
+    hue: tuple[float, float] | None = (18.0, 55.0)  # None = don't check the colour
+    min_sat: float = 50.0         # how colourful the ball must be (0-255); grey shoes and heads fail this
+    court: tuple[float, float, float, float] | None = None  # left,top,right,bottom; ignore the rest
 
 
 def require_cv2() -> None:
@@ -67,17 +72,33 @@ def open_video(path: Path):
     return cap, fps, (w, h), n
 
 
-def small_gray(frame: np.ndarray) -> np.ndarray:
+def shrink(frame: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The frame shrunk to WIDTH: as grey (float) and as HSV, for the colour check."""
     h, w = frame.shape[:2]
     scale = WIDTH / w
-    g = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    return cv2.resize(g, (WIDTH, int(round(h * scale))), interpolation=cv2.INTER_AREA).astype(np.float32)
+    bgr = cv2.resize(frame, (WIDTH, int(round(h * scale))), interpolation=cv2.INTER_AREA)
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    return gray, cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+
+
+def small_gray(frame: np.ndarray) -> np.ndarray:
+    return shrink(frame)[0]
+
+
+def ball_coloured(hsv: np.ndarray, where: np.ndarray, s: BallSettings) -> bool:
+    """Is at least a good part of this blob the ball's colour?"""
+    if s.hue is None:
+        return True
+    px = hsv[where]
+    lo, hi = s.hue
+    ok = (px[:, 1] >= s.min_sat) & (px[:, 0] >= lo) & (px[:, 0] <= hi)
+    return bool(ok.mean() >= 0.4)
 
 
 # ------------------------------------------------------------ finding candidates
 
 def moving_blobs(prev: np.ndarray, cur: np.ndarray, nxt: np.ndarray,
-                 s: BallSettings = BallSettings()) -> list[tuple[float, float, float]]:
+                 s: BallSettings = BallSettings(), hsv: np.ndarray | None = None) -> list[tuple[float, float, float]]:
     """Small round things that moved: (x, y, size) at WIDTH scale."""
     # A pixel that differs from BOTH neighbours is where the ball is now;
     # where it was last frame only differs from one of them.
@@ -103,6 +124,13 @@ def moving_blobs(prev: np.ndarray, cur: np.ndarray, nxt: np.ndarray,
             continue
         cx, cy = int(centers[i][0]), int(centers[i][1])
         if big[cy, cx]:
+            continue
+        if s.court is not None:
+            l, t, r, b = s.court
+            H, W = mask.shape
+            if not (l * W <= cx <= r * W and t * H <= cy <= b * H):
+                continue
+        if hsv is not None and not ball_coloured(hsv, labels == i, s):
             continue
         out.append((float(centers[i][0]), float(centers[i][1]), float(max(w, h))))
     return merge_close(out)
@@ -283,7 +311,7 @@ def track_video(video: Path, s: BallSettings = BallSettings(), model_path: Path 
         model = YOLO(str(model_path))
 
     per_frame: list[list[tuple[float, float, float]]] = []
-    prev = cur = None
+    prev = cur = cur_hsv = None
     frame_i = 0
     while True:
         ok, frame = cap.read()
@@ -292,12 +320,12 @@ def track_video(video: Path, s: BallSettings = BallSettings(), model_path: Path 
         if model is not None:
             per_frame.append(model_blobs(model, frame, s.model_conf))
         else:
-            nxt = small_gray(frame)
+            nxt, nxt_hsv = shrink(frame)
             if prev is not None and cur is not None:
-                per_frame.append(moving_blobs(prev, cur, nxt, s))
+                per_frame.append(moving_blobs(prev, cur, nxt, s, cur_hsv))
             elif cur is not None:
                 per_frame.append([])
-            prev, cur = cur, nxt
+            prev, cur, cur_hsv = cur, nxt, nxt_hsv
         frame_i += 1
         if progress and frame_i % 300 == 0:
             progress(frame_i, n)

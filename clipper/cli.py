@@ -58,7 +58,9 @@ def cmd_motion(a):
 
 def cmd_ball(a):
     work = work_for(a.game)
-    settings = ball_mod.BallSettings(diff_threshold=a.diff_threshold)
+    hue = None if a.no_colour else tuple(float(x) for x in a.hue.split(","))
+    settings = ball_mod.BallSettings(diff_threshold=a.diff_threshold, hue=hue, min_sat=a.min_sat,
+                                     court=motion_mod.parse_region(a.court) if a.court else None)
     model = Path(a.model) if a.model else None
 
     def progress(done, total):
@@ -213,6 +215,13 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--model", help="a trained ball model (.pt) from 'clip train-ball'; default: no training needed")
     s.add_argument("--diff-threshold", type=float, default=ball_mod.BallSettings.diff_threshold,
                    help="no-training detector: lower = sees fainter balls, more noise (default %(default)s)")
+    s.add_argument("--hue", default="18,55", help="no-training detector: the ball's colour as an OpenCV hue "
+                   "range 0-180 (yellow ~30, green ~60, orange ~12; default %(default)s)")
+    s.add_argument("--min-sat", type=float, default=ball_mod.BallSettings.min_sat,
+                   help="how colourful the ball must be, 0-255 (default %(default)s)")
+    s.add_argument("--no-colour", action="store_true", help="don't check the colour at all")
+    s.add_argument("--court", help="only look inside this part of the frame: left,top,right,bottom as "
+                                   "fractions, e.g. 0.05,0.25,0.95,0.95")
     s.add_argument("--no-check", action="store_true", help="skip the ball_check.mp4 video")
     s.set_defaults(func=cmd_ball)
 
