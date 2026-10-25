@@ -15,6 +15,7 @@ PROXY = "proxy.mp4"      # small 480p copy for later vision steps
 INFO = "info.json"       # duration and source path
 HITS = "hits.json"
 HITS_CHECK = "hits_check.mp4"
+MOTION = "motion.json"   # how much the picture moves, 10 times a second
 RALLIES = "rallies.json"
 
 SAMPLE_RATE = 16_000

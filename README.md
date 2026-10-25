@@ -7,8 +7,9 @@ Turns a recorded pickleball game into two videos:
 
 It finds rallies by *listening*: every paddle hit makes a sharp "pop", so a
 run of pops a second or so apart is a rally, and long quiet stretches are dead
-time. No AI model is needed for this part. Vertical (9:16) clips that follow
-the ball come later.
+time. It also *watches* how much the picture moves, since players move much
+more during a point than between points. No AI model is needed for this part.
+Vertical (9:16) clips that follow the ball come later.
 
 ## Setting it up (once)
 
@@ -63,7 +64,8 @@ rerun any step on its own.
 |---|---|---|
 | 1 | `clip ingest my_game.mp4` | Clean copies of the video and its sound |
 | 2 | `clip hits my_game.mp4` | `hits.json`, plus `hits_check.mp4`, which **beeps on every hit it heard**. Watch it to check by ear. |
-| 3 | `clip rallies my_game.mp4` | A list of rallies and how much of the game is kept |
+| 2b | `clip motion my_game.mp4` | `motion.json`: how much the picture moves, moment by moment |
+| 3 | `clip rallies my_game.mp4` | A list of rallies and how much of the game is kept. Uses the sound and, if step 2b was run, the picture. |
 | 3b | `clip eval my_game.mp4 --labels my_labels.csv` | How many of *your* rallies it found, and any false alarms |
 | 4 | `clip export my_game.mp4` | `full_game.mp4` |
 | 5 | `clip export my_game.mp4 --style highlights --top 5` | The highlight reel and the 5 clips |
@@ -71,6 +73,13 @@ rerun any step on its own.
 **If it misses hits**, try `clip hits my_game.mp4 --above-bg-db 9` (lower =
 more sensitive). **If it hears hits that aren't there**, raise it to 15.
 **If rallies get split in two**, try `clip rallies my_game.mp4 --max-gap 3.5`.
+
+**Indoors, or near other courts**, the sound alone is not enough: your own
+hits are barely louder than the room. Run `clip motion` and then
+`clip rallies` again. The picture then settles what the sound can't: hits
+during a still picture (a break) are dropped, two runs of hits with busy play
+between them are joined into one rally, and `--motion-only` also keeps busy
+stretches of play where no hit was heard at all.
 
 ### Writing down your own rally times
 

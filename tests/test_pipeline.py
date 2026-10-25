@@ -3,7 +3,7 @@ import shutil
 import numpy as np
 import pytest
 
-from clipper import common, evaluate, hits, rallies, score, synth
+from clipper import common, evaluate, hits, motion, rallies, score, synth
 from clipper.cli import main
 
 
@@ -71,3 +71,38 @@ def test_whole_pipeline_on_a_fake_game(tmp_path):
     assert len(list(clips.glob("highlight_*_rally*.mp4"))) == 2
     labels = tmp_path / "game_labels.csv"
     assert main(["eval", str(tmp_path / "game_work"), "--labels", str(labels)]) == 0
+
+
+def _motion(duration, busy_spans, fps=10):
+    scores = np.full(int(duration * fps), 0.1, dtype=np.float32)
+    for s, e in busy_spans:
+        scores[int(s * fps): int(e * fps)] = 0.9
+    return scores
+
+
+def test_motion_drops_hits_during_a_still_picture():
+    times = [10, 11, 12, 13,   30, 31, 32]
+    found = rallies.group_hits(times, 60, motion=_motion(60, [(9, 15)]))
+    assert [r["start"] for r in found] == [9]
+
+
+def test_motion_joins_split_rallies_and_keeps_two_hit_runs():
+    times = [10, 11, 12,   18, 19, 20,   40, 41]
+    found = rallies.group_hits(times, 60, motion=_motion(60, [(9, 22), (39, 43)]))
+    assert [(r["start"], r["end"], r["hit_count"]) for r in found] == [(9, 21.5, 6), (39, 42.5, 2)]
+
+
+def test_motion_only_stretches_are_kept_when_asked():
+    settings = rallies.RallySettings(motion_only=True)
+    motion = _motion(60, [(9, 15), (30, 40)])
+    found = rallies.group_hits([10, 11, 12], 60, settings, motion)
+    assert [(r["start"], r["end"], r["hit_count"]) for r in found] == [(9, 13.5, 3), (29, 41.5, 0)]
+    assert len(rallies.group_hits([10, 11, 12], 60, motion=motion)) == 1
+
+
+def test_motion_score_ignores_a_still_picture():
+    scaled, stats = motion.score(np.full(600, 0.2, dtype=np.float32))
+    assert not stats["usable"] and scaled.max() == 0
+    diff = np.where(np.arange(600) % 100 < 50, 8.0, 0.5).astype(np.float32)
+    scaled, stats = motion.score(diff)
+    assert stats["usable"] and scaled[25] > 0.9 and scaled[75] < 0.1
