@@ -45,7 +45,7 @@ def pick_device() -> str:
 
 
 def train(labels_dir: Path, out: Path, epochs: int = 40, imgsz: int = 1280, batch: int = 8,
-          base: str = "yolov8n.pt", device: str | None = None) -> Path:
+          base: str = "yolo11n.pt", device: str | None = None) -> Path:
     try:
         from ultralytics import YOLO
     except ImportError:

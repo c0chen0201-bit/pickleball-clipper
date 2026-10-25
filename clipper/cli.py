@@ -88,7 +88,7 @@ def cmd_label_fix(a):
 
 
 def cmd_train_ball(a):
-    out = train_mod.train(Path(a.labels), Path(a.out), a.epochs, a.imgsz, a.batch, device=a.device)
+    out = train_mod.train(Path(a.labels), Path(a.out), a.epochs, a.imgsz, a.batch, base=a.base, device=a.device)
     print(f"Trained ball model -> {out}. Use it with: clip ball <game> --model {out}")
 
 
@@ -228,6 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--imgsz", type=int, default=1280)
     s.add_argument("--batch", type=int, default=8)
     s.add_argument("--device", help="mps, cpu or 0 for the first GPU (default: best available)")
+    s.add_argument("--base", default="yolo11n.pt", help="starting model (default %(default)s, downloaded if missing)")
     s.set_defaults(func=cmd_train_ball)
 
     s = sub.add_parser("eval", help="compare found rallies with a CSV of real rally times")
