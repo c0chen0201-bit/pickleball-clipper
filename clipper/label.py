@@ -20,7 +20,8 @@ from . import ball as ball_mod
 from . import common as c
 
 BOX_MIN = 22      # pixels: a box this big always covers the ball at 1080p
-BOX_SCALE = 1.8   # box side relative to the blob the tracker saw
+BOX_MAX = 60      # a blurred ball near the camera streaks, but the ball itself is never bigger
+BOX_SCALE = 1.6   # box side relative to the blob the tracker saw
 
 
 def choose_frames(data: dict, n: int, negatives: float = 0.2, min_track: int = 12,
@@ -61,7 +62,7 @@ def grab_frames(video: Path, frames: list[int]):
 
 
 def box_for(x: float, y: float, size: float, w: int, h: int) -> tuple[float, float, float, float]:
-    side = max(BOX_MIN, size * BOX_SCALE)
+    side = min(BOX_MAX, max(BOX_MIN, size * BOX_SCALE))
     return x / w, y / h, side / w, side / h
 
 
